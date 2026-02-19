@@ -34,7 +34,7 @@ plt.rcParams.update({'font.size': 14})
 sns.set_palette('Paired')
 
 # --- configuration ---
-STD_THRESHOLD = 3.8
+STD_THRESHOLD = 2.7
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
 COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2)
 COI_2 = 1  # secondary channel of interest for comparisons
@@ -42,11 +42,12 @@ COI_1_name = 'coilin'  # name of the first channel of interest, for plotting
 COI_2_name  = 'sumo1'  # name of the second channel of interest, for plotting
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
 #--- puncta shape filtering ---
-MIN_PUNCTA_SIZE = 6  # minimum size of puncta
-MIN_CIRCULARITY = 0.75 # 1.0 = perfect circle
-MAX_ECCENTRICITY = 0.75 # 0 = circle; 1 = line
-MIN_SOLIDITY = 0.85 #1 = solid; lower = ragged/fragmented 
-MIN_ASPECT_RATIO = 0.7   #minor/major; 1 is circle
+MIN_PUNCTA_SIZE = 3  # minimum size of puncta
+MAX_PUNCTA_SIZE = 300 #px, tune
+MIN_CIRCULARITY = 0.55 # 1.0 = perfect circle
+MAX_ECCENTRICITY = 0.9 # 0 = circle; 1 = line
+MIN_SOLIDITY = 0.7 #1 = solid; lower = ragged/fragmented 
+MIN_ASPECT_RATIO = 0.45   #minor/major; 1 is circle
 
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
@@ -132,7 +133,6 @@ def filter_saturated_images(images, cytoplasm_masks, masks):
     logger.info('saturated cells filtered.')
     return filtered
 
-
 def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
     logger.info('collecting cell & puncta features...')
     results = []
@@ -150,32 +150,48 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
 
             threshold = (std_coi1 * STD_THRESHOLD) + mean_coi1
             binary = (coi1 > threshold) & cell_mask
+
             puncta_labels = morphology.label(binary)
             puncta_labels = remove_small_objects(puncta_labels, min_size=MIN_PUNCTA_SIZE)
 
             df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
-                
+
+            # --- size filter ---
             if not df_p.empty:
-                # avoid divide-by-zero
+                size_keep = (
+                    (df_p['puncta_area'] >= MIN_PUNCTA_SIZE) &
+                    (df_p['puncta_area'] <= MAX_PUNCTA_SIZE)
+                )
+                kept_labels = df_p.loc[size_keep, 'puncta_label'].astype(int).to_numpy()
+
+                puncta_labels = np.where(np.isin(puncta_labels, kept_labels), puncta_labels, 0)
+                puncta_labels = morphology.label(puncta_labels > 0)
+
+                df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
+
+            # --- shape filter ---
+            if not df_p.empty:
                 df_p['puncta_circularity'] = (4 * np.pi * df_p['puncta_area']) / (df_p['puncta_perimeter']**2 + 1e-9)
                 df_p['puncta_aspect_ratio'] = df_p['puncta_minor_axis_length'] / (df_p['puncta_major_axis_length'] + 1e-9)
 
-                keep = (
+                shape_keep = (
                     (df_p['puncta_circularity'] >= MIN_CIRCULARITY) &
                     (df_p['puncta_eccentricity'] <= MAX_ECCENTRICITY) &
                     (df_p['puncta_solidity'] >= MIN_SOLIDITY) &
                     (df_p['puncta_aspect_ratio'] >= MIN_ASPECT_RATIO)
                 )
+                kept_labels = df_p.loc[shape_keep, 'puncta_label'].astype(int).to_numpy()
 
-                kept_labels = df_p.loc[keep, 'puncta_label'].astype(int).to_numpy()
-
-                # relabel mask to keep only accepted puncta
                 puncta_labels = np.where(np.isin(puncta_labels, kept_labels), puncta_labels, 0)
                 puncta_labels = morphology.label(puncta_labels > 0)
 
-                # re-extract props AFTER filtering so labels/coords match the kept objects
                 df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
-            # define column names for the extra stats
+
+            # if nothing left after filtering, skip this cell
+            if df_p.empty:
+                continue
+
+            # --- intensity stats per punctum ---
             stats_columns = [
                 'puncta_cv',
                 'puncta_skew',
@@ -183,28 +199,24 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
                 'puncta_intensity_mean_in_coi2'
             ]
 
-            if df_p.empty:
-                # create a single-row df filled with 0s, same columns
-                df_stats = pd.DataFrame([[np.nan] * len(stats_columns)], columns=stats_columns)
-            else:
-                stats_list = []
-                for i, row in df_p.iterrows():
-                    p_mask = puncta_labels == row['puncta_label']
-                    puncta_vals = coi1[p_mask]
-                    cv = puncta_vals.std() / puncta_vals.mean() if puncta_vals.mean() != 0 else np.nan
-                    skew_stat = skewtest(puncta_vals).statistic if len(puncta_vals) >= 8 else np.nan
-                    mean_p = puncta_vals.mean()
-                    mean_coi2 = coi2[p_mask].mean()
-                    stats_list.append((cv, skew_stat, mean_p, mean_coi2))
+            stats_list = []
+            for _, row in df_p.iterrows():
+                p_mask = puncta_labels == row['puncta_label']
+                puncta_vals = coi1[p_mask]
+                cv = puncta_vals.std() / puncta_vals.mean() if puncta_vals.mean() != 0 else np.nan
+                skew_stat = skewtest(puncta_vals).statistic if len(puncta_vals) >= 8 else np.nan
+                mean_p = puncta_vals.mean()
+                mean_coi2 = coi2[p_mask].mean()
+                stats_list.append((cv, skew_stat, mean_p, mean_coi2))
 
-                df_stats = pd.DataFrame(stats_list, columns=stats_columns)
-            
+            df_stats = pd.DataFrame(stats_list, columns=stats_columns)
+
             df = pd.concat([df_p.reset_index(drop=True), df_stats], axis=1)
             df['image_name'], df['cell_number'] = name, lbl
             df['cell_size'] = cell_mask.sum()
             df['cell_std'] = std_coi1
-            df['cell_cv'] = std_coi1 / mean_coi1  # coefficient of variation
-            df['cell_skew'] = skewtest(coi1_vals).statistic
+            df['cell_cv'] = std_coi1 / mean_coi1
+            df['cell_skew'] = skewtest(coi1_vals).statistic if len(coi1_vals) >= 8 else np.nan
             df['cell_coi1_intensity_mean'] = mean_coi1
             df['cell_coi2_intensity_mean'] = (coi2[cell_mask]).mean()
             df['cell_coords'] = [contour] * len(df)
@@ -212,13 +224,13 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
             results.append(df)
 
     logger.info('feature extraction done.')
-    return pd.concat(results, ignore_index=True)
+    return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
 
 
 def extra_puncta_features(df):
     df = df.copy()  # avoid modifying in place
     df['puncta_aspect_ratio'] = df['puncta_minor_axis_length'] / df['puncta_major_axis_length']
-    df['puncta_circularity'] = 12.566 * df['puncta_area'] / (df['puncta_perimeter'] ** 2)
+    df['puncta_circularity'] = (4 * np.pi * df['puncta_area']) / (df['puncta_perimeter']**2 + 1e-9)
     df['coi2_partition_coeff'] = df['puncta_intensity_mean_in_coi2'] / df['cell_coi2_intensity_mean']
     df['coi1_partition_coeff'] = df['puncta_intensity_mean'] / df['cell_coi1_intensity_mean']
 
@@ -304,6 +316,9 @@ if __name__ == '__main__':
 
     # --- feature extraction ---
     features = collect_features(filtered)
+    if features.empty:
+        logger.warning("No puncta detected after filtering; nothing to save/plot.")
+        sys.exit(0)
     features = extra_puncta_features(features)
 
     # --- generate proofs ---
