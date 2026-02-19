@@ -18,7 +18,7 @@ from scipy.stats import skewtest
 from loguru import logger
 import functools
 # special import, path to script
-napari_utils_path = 'punctalyze/src/3_napari.py' # adjust as needed
+napari_utils_path = 'punctalyze-SRT/src/3_napari.py' # adjust as needed
 
 # load the module dynamically due to annoying file name
 spec = importlib.util.spec_from_file_location("napari", napari_utils_path)
@@ -36,12 +36,18 @@ sns.set_palette('Paired')
 # --- configuration ---
 STD_THRESHOLD = 3.8
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
-COI_1 = 1  # channel of interest for saturation check (e.g., 1 for channel 2)
-COI_2 = 0  # secondary channel of interest for comparisons
-COI_1_name = 'TDP43-YFP'  # name of the first channel of interest, for plotting
-COI_2_name  = 'DAPI'  # name of the second channel of interest, for plotting
-MIN_PUNCTA_SIZE = 4  # minimum size of puncta
+COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2)
+COI_2 = 1  # secondary channel of interest for comparisons
+COI_1_name = 'coilin'  # name of the first channel of interest, for plotting
+COI_2_name  = 'sumo1'  # name of the second channel of interest, for plotting
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
+#--- puncta shape filtering ---
+MIN_PUNCTA_SIZE = 6  # minimum size of puncta
+MIN_CIRCULARITY = 0.75 # 1.0 = perfect circle
+MAX_ECCENTRICITY = 0.75 # 0 = circle; 1 = line
+MIN_SOLIDITY = 0.85 #1 = solid; lower = ragged/fragmented 
+MIN_ASPECT_RATIO = 0.7   #minor/major; 1 is circle
+
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
 mask_folder = 'results/napari_masking/'
@@ -56,7 +62,7 @@ for folder in [output_folder, proofs_folder]:
 def feature_extractor(mask, properties=None):
     if properties is None:
         properties = [
-            'area', 'eccentricity', 'label',
+            'area', 'eccentricity', 'solidity', 'label',
             'major_axis_length', 'minor_axis_length',
             'perimeter', 'coords'
         ]
@@ -148,7 +154,27 @@ def collect_features(image_dict, STD_THRESHOLD=STD_THRESHOLD):
             puncta_labels = remove_small_objects(puncta_labels, min_size=MIN_PUNCTA_SIZE)
 
             df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
-            
+                
+            if not df_p.empty:
+                # avoid divide-by-zero
+                df_p['puncta_circularity'] = (4 * np.pi * df_p['puncta_area']) / (df_p['puncta_perimeter']**2 + 1e-9)
+                df_p['puncta_aspect_ratio'] = df_p['puncta_minor_axis_length'] / (df_p['puncta_major_axis_length'] + 1e-9)
+
+                keep = (
+                    (df_p['puncta_circularity'] >= MIN_CIRCULARITY) &
+                    (df_p['puncta_eccentricity'] <= MAX_ECCENTRICITY) &
+                    (df_p['puncta_solidity'] >= MIN_SOLIDITY) &
+                    (df_p['puncta_aspect_ratio'] >= MIN_ASPECT_RATIO)
+                )
+
+                kept_labels = df_p.loc[keep, 'puncta_label'].astype(int).to_numpy()
+
+                # relabel mask to keep only accepted puncta
+                puncta_labels = np.where(np.isin(puncta_labels, kept_labels), puncta_labels, 0)
+                puncta_labels = morphology.label(puncta_labels > 0)
+
+                # re-extract props AFTER filtering so labels/coords match the kept objects
+                df_p = feature_extractor(puncta_labels).add_prefix('puncta_')
             # define column names for the extra stats
             stats_columns = [
                 'puncta_cv',
@@ -286,9 +312,9 @@ if __name__ == '__main__':
 
     # --- data wrangling ---
     logger.info('starting data wrangling and saving...')
-    features['tag'] = ['EYFP' for name in features['image_name']]
-    features['condition'] = features['image_name'].str.split('-').str[0]
-    features['rep'] = features['image_name'].str.split('-').str[-2]
+   
+    # features['condition'] = features['image_name'].str.split('-').str[0]
+    # features['rep'] = features['image_name'].str.split('-').str[-2]
 
     cols = features.columns.tolist()
     cols = [item for item in cols if '_coords' not in item]
@@ -306,9 +332,9 @@ if __name__ == '__main__':
     features = features.drop(columns=cols_to_drop)
     features.to_csv(f'{output_folder}puncta_features.csv', index=False)
 
-    # save averages per biological replicate
-    rep_df = aggregate_features_by_group(features, ['condition', 'tag', 'rep'], cols)
-    rep_df.to_csv(f'{output_folder}puncta_features_reps.csv', index=False)
+    # # save averages per biological replicate
+    # rep_df = aggregate_features_by_group(features, ['condition', 'rep'], cols)
+    # rep_df.to_csv(f'{output_folder}puncta_features_reps.csv', index=False)
 
     # save features normalized to cell intensity of channel of interest
     df_norm = features.copy()
@@ -316,9 +342,9 @@ if __name__ == '__main__':
         df_norm[col] /= df_norm['cell_coi1_intensity_mean']
     df_norm.to_csv(f'{output_folder}puncta_features_normalized.csv', index=False)
 
-    # save normalized averages per biological replicate
-    rep_norm_df = aggregate_features_by_group(df_norm, ['condition', 'tag', 'rep'], cols)
-    rep_norm_df.to_csv(f'{output_folder}puncta_features_normalized_reps.csv', index=False)
+    # # save normalized averages per biological replicate
+    # rep_norm_df = aggregate_features_by_group(df_norm, ['condition', 'tag', 'rep'], cols)
+    # rep_norm_df.to_csv(f'{output_folder}puncta_features_normalized_reps.csv', index=False)
 
     logger.info('data wrangling and saving complete.')
     logger.info('pipeline complete.')
