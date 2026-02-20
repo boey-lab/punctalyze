@@ -34,7 +34,7 @@ plt.rcParams.update({'font.size': 14})
 sns.set_palette('Paired')
 
 # --- configuration ---
-STD_THRESHOLD = 2.7
+STD_THRESHOLD = 3.8 # number of standard deviations above the mean to set as threshold for puncta detection, adjust based on expected signal-to-noise in your images
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
 COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2) (puncta)
 COI_2 = 1  # secondary channel of interest for comparisons (other)
