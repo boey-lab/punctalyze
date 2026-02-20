@@ -49,6 +49,10 @@ MAX_ECCENTRICITY = 0.9 # 0 = circle; 1 = line
 MIN_SOLIDITY = 0.7 #1 = solid; lower = ragged/fragmented 
 MIN_ASPECT_RATIO = 0.45   #minor/major; 1 is circle
 
+# --- quantification region ---
+# options: "cell", "nucleus"
+QUANT_REGION = "nucleus"
+
 SCALE_UNIT = 'um'  # units for the scale bar
 image_folder = 'results/initial_cleanup/'
 mask_folder = 'results/napari_masking/'
@@ -88,6 +92,26 @@ def load_masks(mask_folder):
             masks[name] = np.load(f'{mask_folder}/{fn}', allow_pickle=True)
     return masks
 
+def build_quant_masks(masks, region="cell"):
+    """
+    Returns label masks defining the region in which puncta detection happens.
+    """
+    quant_masks = {}
+
+    for name, m in masks.items():
+        cell_mask, nuc_mask = m[0], m[1]
+
+        if region == "cell":
+            quant_masks[name] = cell_mask
+
+        elif region == "nucleus":
+            # ensure labeled nuclei (not just binary)
+            quant_masks[name] = morphology.label(nuc_mask > 0)
+
+        else:
+            raise ValueError(f"Unknown QUANT_REGION: {region}")
+
+    return quant_masks
 
 def generate_cytoplasm_masks(masks):
     logger.info('removing nuclei from cell masks...')
@@ -311,8 +335,8 @@ if __name__ == '__main__':
     # filtered = filter_saturated_images(images, cyto_masks, masks)
 
     # -- OR collect and filter cell masks ---
-    cell_masks = {name: mask[0] for name, mask in masks.items()}
-    filtered = filter_saturated_images(images, cell_masks, masks)
+    quant_masks = build_quant_masks(masks, QUANT_REGION)
+    filtered = filter_saturated_images(images, quant_masks, masks)
 
     # --- feature extraction ---
     features = collect_features(filtered)
