@@ -36,8 +36,8 @@ sns.set_palette('Paired')
 # --- configuration ---
 STD_THRESHOLD = 2.7
 SAT_FRAC_CUTOFF = 0.01  # for consistency with remove_saturated_cells
-COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2)
-COI_2 = 1  # secondary channel of interest for comparisons
+COI_1 = 0  # channel of interest for saturation check (e.g., 1 for channel 2) (puncta)
+COI_2 = 1  # secondary channel of interest for comparisons (other)
 COI_1_name = 'coilin'  # name of the first channel of interest, for plotting
 COI_2_name  = 'sumo1'  # name of the second channel of interest, for plotting
 SCALE_PX = (294.67/2720) # size of one pixel in units specified by the next constant
@@ -153,7 +153,7 @@ def filter_saturated_images(images, cytoplasm_masks, masks):
             mask_stack=masks[name],
             COI=COI_1
         )
-        filtered[name] = np.stack([stack[COI_2], stack[COI_1], cells])
+        filtered[name] = np.stack([img[COI_2], img[COI_1], cells])
     logger.info('saturated cells filtered.')
     return filtered
 
