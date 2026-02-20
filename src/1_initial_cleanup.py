@@ -2,6 +2,8 @@
 Import data as numpy array
 """
 
+#used bioiamge-fazallab environment 
+
 import os
 import numpy as np
 from loguru import logger
@@ -13,8 +15,8 @@ import bioio_nd2
 logger.info('import ok')
 
 # configuration
-input_path = 'raw_data/'
-output_folder = 'results/initial_cleanup/'
+input_path = r'P:/Sophie/Analysis for Sophie/A3-B3 Coilin-546 SUMO1-488/'
+output_folder = r'C:/Users/u244278/OneDrive - Baylor College of Medicine/Documents/python_projects/ANA_011626_LL-nucleolus-shape/results/initial_cleanup/'
 image_extensions = ['.czi', '.tif', '.tiff', '.lif', '.nd2']
 
 
@@ -81,7 +83,7 @@ def image_converter(image_path, output_folder, tiff=False, MIP=False, array=True
 if __name__ == '__main__':
     
     # --------------- initalize file_list ---------------
-    if input_path == 'raw_data/':
+    if input_path == r'P:/Sophie/Analysis for Sophie/A3-B3 Coilin-546 SUMO1-488/':
         flat_file_list = [input_path + filename for filename in os.listdir(input_path) if any(sub in filename for sub in image_extensions)]
 
     else:
@@ -100,7 +102,7 @@ if __name__ == '__main__':
         flat_file_list = [item for sublist in file_list for item in sublist if any(sub in item for sub in image_extensions)]
 
     # remove images that do not require analysis (e.g., qualitative controls)
-    do_not_quantitate = ['_no-', 'UT'] 
+    do_not_quantitate = [] 
     image_names = [filename for filename in flat_file_list if not any(word in filename for word in do_not_quantitate)]
 
     # remove duplicates
