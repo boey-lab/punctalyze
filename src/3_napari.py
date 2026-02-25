@@ -21,7 +21,7 @@ SATURATION_THRESHOLD = 60000
 SATURATION_FRAC_CUTOFF = 0.05
 NUCLEUS_AREA_THRESHOLD = 8000
 BORDER_BUFFER_SIZE = 10
-COI = 1 # channel of interest for saturation check (e.g., 1 for channel 2)
+COI = 0 # channel of interest for saturation check (e.g., 1 for channel 2)
 FLUORO_INTENSITY_THRESHOLD = 200  # threshold for significant fluorescence intensity in COI
 FLUORO_FRACTION_CUTOFF = 0.1  # fraction of pixels in a cell that must be above the threshold to keep it
 

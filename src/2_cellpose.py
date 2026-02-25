@@ -1,6 +1,7 @@
 """
 Applies cellpose algorithms to determine cellular and nuclear masks
 """
+# used napari-fast environment 
 
 import os
 import cv2
