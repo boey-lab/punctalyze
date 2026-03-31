@@ -17,13 +17,13 @@ image_folder = 'results/initial_cleanup/'
 mask_folder = 'results/cellpose_masking/'
 output_folder = 'results/napari_masking/'
 mask_filename = 'cellpose_cellmasks.npy'
-SATURATION_THRESHOLD = 60000
-SATURATION_FRAC_CUTOFF = 0.05
-NUCLEUS_AREA_THRESHOLD = 8000
-BORDER_BUFFER_SIZE = 10
-COI = 1 # channel of interest for saturation check (e.g., 1 for channel 2)
-FLUORO_INTENSITY_THRESHOLD = 200  # threshold for significant fluorescence intensity in COI
-FLUORO_FRACTION_CUTOFF = 0.1  # fraction of pixels in a cell that must be above the threshold to keep it
+SATURATION_THRESHOLD = 2**16 - 1  # assuming 16-bit images
+SATURATION_FRAC_CUTOFF = 0.05 # saturation tolerance, fraction of pixels in a cell that can be saturated before cell is discarded
+NUCLEUS_AREA_THRESHOLD = 800 # minimum area for a nucleus to be considered valid, in pixels
+BORDER_BUFFER_SIZE = 10 # number of pixels from the edge of the image to consider as 'border' for removal of border-touching objects
+COI = 0 # channel of interest for saturation check 
+FLUORO_INTENSITY_THRESHOLD = 1000  # threshold for significant fluorescence intensity in COI
+FLUORO_FRACTION_CUTOFF = 0.1  # expression tolerance, fraction of pixels in a cell that must be above the fluorescence threshold to be kept
 
 
 # Setup
@@ -150,6 +150,15 @@ def run_qc_pipeline(filter_fluoro=False):
     images = load_images(image_folder)
     masks = load_masks(os.path.join(mask_folder, mask_filename), images.keys())
 
+    # remove images with mismatching image and mask shapes
+    valid_images = {}
+    for name, img in images.items():
+        if img.shape[1:] == masks[name].shape[1:]:
+            valid_images[name] = img
+        else:
+            logger.warning(f'Shape mismatch for {name}: image shape {img.shape} vs mask shape {masks[name].shape}. Skipping.')
+    images = valid_images
+    
     logger.info('starting automated mask filtering')
     filtered_masks = {
         name: filter_masks_auto(image, masks[name], filter_fluoro=filter_fluoro)
@@ -164,7 +173,6 @@ def run_qc_pipeline(filter_fluoro=False):
     }
 
     for name, image in images.items():
-        name
         if name not in already_filtered:
             _ = validate_with_napari(image, name, filtered_masks[name])
 
