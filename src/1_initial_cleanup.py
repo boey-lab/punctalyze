@@ -16,8 +16,8 @@ import bioio_nd2
 logger.info('import ok')
 
 # configuration
-input_path = 'M:/Olivia/2026-02-28'
-output_folder = 'results/initial_cleanup/'
+input_path = r"P:\Sophie\uptake_project\Figure6_conservation\KILL-CURVES\scenes\26037_naeg-12hr"
+output_folder = '26037_results/initial_cleanup/'
 image_extensions = ['.czi', '.tif', '.tiff', '.lif', '.nd2']
 
 
