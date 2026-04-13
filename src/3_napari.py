@@ -7,6 +7,7 @@ import numpy as np
 from skimage.segmentation import clear_border
 from skimage.io import imread
 from loguru import logger
+import matplotlib.pyplot as plt
 import napari
 from qtpy.QtWidgets import QApplication
 
@@ -21,8 +22,8 @@ SATURATION_THRESHOLD = 2**16 - 1  # assuming 16-bit images
 SATURATION_FRAC_CUTOFF = 0.05 # saturation tolerance, fraction of pixels in a cell that can be saturated before cell is discarded
 NUCLEUS_AREA_THRESHOLD = 800 # minimum area for a nucleus to be considered valid, in pixels
 BORDER_BUFFER_SIZE = 10 # number of pixels from the edge of the image to consider as 'border' for removal of border-touching objects
-COI = 0 # channel of interest for saturation check 
-FLUORO_INTENSITY_THRESHOLD = 1000  # threshold for significant fluorescence intensity in COI
+COI = [0, 1] # channel of interest for saturation check 
+FLUORO_INTENSITY_THRESHOLD = 500  # threshold for significant fluorescence intensity in COI
 FLUORO_FRACTION_CUTOFF = 0.1  # expression tolerance, fraction of pixels in a cell that must be above the fluorescence threshold to be kept
 
 
@@ -39,11 +40,10 @@ def load_images(image_folder):
     }
 
 
-def load_masks(mask_path, image_keys):
-    all_masks = np.load(mask_path)
+def load_masks(mask_folder):
     return {
-        image_name: all_masks[i, :, :]
-        for i, image_name in enumerate(image_keys)
+        fname.replace('_sammask.npy', ''): np.load(os.path.join(mask_folder, fname))
+        for fname in os.listdir(mask_folder) if fname.endswith('_sammask.npy')
     }
 
 
@@ -56,6 +56,9 @@ def save_mask(image_name, mask_stack):
 # Mask Filtering
 def remove_saturated_cells(image_stack, mask_stack, COI=COI):
     '''Remove masks for saturated cells based on intensity threshold.'''
+    if isinstance(COI, list):
+        COI = COI[0]  # for now, just check the first channel of interest
+
     raw = image_stack[COI, :, :]
     cells = mask_stack[0, :, :]
 
@@ -71,19 +74,33 @@ def remove_saturated_cells(image_stack, mask_stack, COI=COI):
     return filtered_cells
 
 
-def filter_cells_by_fluoro_expression(image_stack, cells_mask):
-    """Keep only cells with significant fluoro signal."""
-    fluoro = image_stack[COI, :, :]
+def filter_cells_by_fluoro_expression(image_stack, cells_mask, COI=COI):
+    """Keep only cells with significant fluoro signal in all specified channels."""
+    
+    # if COI is iterable
+    if isinstance(COI, int):
+        COI = [COI]
+
     valid_labels = []
 
     for label in np.unique(cells_mask)[1:]:
         mask = (cells_mask == label)
         pixel_count = np.count_nonzero(mask)
 
-        fluoro_pixels = fluoro[mask]
-        bright_pixels = np.count_nonzero(fluoro_pixels > FLUORO_INTENSITY_THRESHOLD)
+        keep_cell = True  # assume valid unless a channel fails
 
-        if bright_pixels / pixel_count > FLUORO_FRACTION_CUTOFF:
+        for ch in COI:
+            fluoro = image_stack[ch, :, :]
+            fluoro_pixels = fluoro[mask]
+            bright_pixels = np.count_nonzero(
+                fluoro_pixels > FLUORO_INTENSITY_THRESHOLD
+            )
+
+            if bright_pixels / pixel_count <= FLUORO_FRACTION_CUTOFF:
+                keep_cell = False
+                break  # fail fast
+
+        if keep_cell:
             valid_labels.append(label)
 
     filtered_cells = np.where(np.isin(cells_mask, valid_labels), cells_mask, 0)
@@ -113,7 +130,7 @@ def filter_masks_auto(image_stack, mask_stack, filter_fluoro=False):
         cells_filtered = filter_cells_by_fluoro_expression(image_stack, cells_filtered)
 
     intra_nuclei = np.where(cells_filtered > 0, nuclei, 0)
-    filtered_nuclei = filter_small_nuclei(intra_nuclei)
+    filtered_nuclei = filter_small_nuclei(nuclei) # note, do not want to remove all nuclei for now
 
     return np.stack([cells_filtered, filtered_nuclei])
 
@@ -144,37 +161,41 @@ def validate_with_napari(image_stack, image_name, mask_stack):
 
 
 # Main QC Pipeline
-def run_qc_pipeline(filter_fluoro=False):
+def run_qc_pipeline(filter_fluoro=True):
     ensure_output_folder(output_folder)
 
-    images = load_images(image_folder)
-    masks = load_masks(os.path.join(mask_folder, mask_filename), images.keys())
+    image_files = [f for f in os.listdir(image_folder) if f.endswith('.npy')]
 
-    # remove images with mismatching image and mask shapes
-    valid_images = {}
-    for name, img in images.items():
-        if img.shape[1:] == masks[name].shape[1:]:
-            valid_images[name] = img
-        else:
-            logger.warning(f'Shape mismatch for {name}: image shape {img.shape} vs mask shape {masks[name].shape}. Skipping.')
-    images = valid_images
-    
-    logger.info('starting automated mask filtering')
-    filtered_masks = {
-        name: filter_masks_auto(image, masks[name], filter_fluoro=filter_fluoro)
-        for name, image in images.items()
-    }
-
-    logger.info('starting manual validation in napari')
+    # find masks that have already been filtered and saved, to skip these
     already_filtered = {
         fname.replace('_mask.npy', '')
         for fname in os.listdir(output_folder)
         if fname.endswith('_mask.npy')
     }
 
-    for name, image in images.items():
-        if name not in already_filtered:
-            _ = validate_with_napari(image, name, filtered_masks[name])
+    for fname in image_files:
+        name = fname.replace('.npy', '')
+
+        if name in already_filtered:
+            continue
+
+        #  load only what you need
+        image = np.load(os.path.join(image_folder, fname))
+        mask = np.load(os.path.join(mask_folder, f"{name}_sammask.npy"))
+
+        #  shape check
+        if image.shape[1:] != mask.shape[1:]:
+            logger.warning(f"Shape mismatch for {name}, skipping")
+            continue
+
+        #  process immediately
+        filtered_mask = filter_masks_auto(image, mask, filter_fluoro=filter_fluoro)
+
+        #  manual QC
+        validate_with_napari(image, name, filtered_mask)
+
+        #  free memory explicitly
+        del image, mask, filtered_mask
 
 
 # Entry Point
