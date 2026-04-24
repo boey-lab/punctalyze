@@ -280,10 +280,10 @@ if __name__ == '__main__':
     }
 
     # --------------- initalize file_list ---------------
-    if input_path == 'raw_data/':
+    if input_path == 'raw_data/': # if data is loaded locally into 'raw_data'
         flat_file_list = [input_path + filename for filename in os.listdir(input_path) if any(sub in filename for sub in image_extensions)]
 
-    else:
+    else: # if data needs to be pulled from other directories
         # find subdirectories of interest
         experiments = ['240509-Processed']
         # if you want all images from all subdirectories in file path, set experiments to 'walk_list'
@@ -309,6 +309,6 @@ if __name__ == '__main__':
     # --------------- collect image names and convert ---------------
     # collect and convert images to np arrays
     for name in image_names:
-        image_converter(name, output_folder=f'{output_folder}', find_scenes=True, name_dict=name_dict, MIP=True, experiment_prefix=True)
+        image_converter(name, output_folder=f'{output_folder}', find_scenes=False, name_dict=None, MIP=False, experiment_prefix=False)
 
     logger.info('initial cleanup complete :-)')
