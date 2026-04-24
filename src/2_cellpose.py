@@ -136,7 +136,8 @@ if __name__ == '__main__':
     # Cellpose-SAM will use the first 3 channels of your image, truncating the rest. It has been trained with the cytoplasm and nuclear channels in any order, with the other channel set to zero.
     # you can combine two stains to create your cytoplasm channel and/or nuclear channels
     imgs_cp = {
-        name: np.stack((img[cyto].sum(axis=0), img[nucleus].sum(axis=0)
+        name: np.stack((img[cyto].sum(axis=0), img[nucleus].sum(axis=0))) 
+        for name, img in images_dict.items()
     }
     
     # # subtract one image from another to reduce background and improve segmentation
